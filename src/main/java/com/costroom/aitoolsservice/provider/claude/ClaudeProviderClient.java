@@ -69,6 +69,8 @@ public class ClaudeProviderClient implements ProviderClient {
                         .atStartOfDay(ZoneOffset.UTC)
                         .toEpochSecond();
 
+                // Usage row — tokens/requests only. source_type="usage" is the contract
+                // aianalytics-service relies on for token/request aggregation.
                 snapshots.add(AiUsageSnapshot.builder()
                         .orgId(tool.getOrgId())
                         .aiToolId(tool.getId())
@@ -81,8 +83,25 @@ public class ClaudeProviderClient implements ProviderClient {
                         .outputTokens(entry.outputTokens())
                         .inputCachedTokens(entry.cacheReadInputTokens())
                         .totalRequests(entry.requestCount())
-                        .costUsd(entry.costUsd())
                         .build());
+
+                // Cost row — kept separate with source_type="cost", mirroring
+                // OpenAiProviderClient's fetchCostSnapshots. aianalytics-service only
+                // sums cost_usd on rows tagged source_type="cost"; emitting it on the
+                // usage row above caused Claude spend to be silently dropped from every
+                // cost aggregation (summary, daily usage, burn rate, forecast, anomaly).
+                if (entry.costUsd() != null) {
+                    snapshots.add(AiUsageSnapshot.builder()
+                            .orgId(tool.getOrgId())
+                            .aiToolId(tool.getId())
+                            .provider("claude")
+                            .modelId(entry.model())
+                            .snapshotType("completions")
+                            .sourceType("cost")
+                            .bucketStartTime(bucketEpoch)
+                            .costUsd(entry.costUsd())
+                            .build());
+                }
             }
 
         } catch (Exception e) {
